@@ -5,7 +5,7 @@ using P = (double X, double Y);
 
 namespace PVLocal;
 
-public enum TextAlign { Left, MiddleLeft, MiddleCenter }
+public enum TextAlign { Left, MiddleLeft, MiddleCenter, MiddleRight }
 
 public interface ICanvas
 {
@@ -95,7 +95,7 @@ public static class Drawing
         {
             var (x, y) = t.Pos;
             c.Pline(tr ? Box(x - 1.2, y - 3, x + 1.2, y + 3) : Box(x - 3, y - 1.2, x + 3, y + 1.2), true, "PV_STATIONS");
-            c.Text(tr ? x : x - 3.5, tr ? y - 3.5 : y, h * 1.2, $"{t.Id}  {t.Kw / 1000:0.0} MVA", "PV_STATIONS", rot, tr ? TextAlign.MiddleLeft : TextAlign.MiddleLeft);
+            c.Text(tr ? x : x - 3.5, tr ? y - 3.5 : y, h * 1.2, $"{t.Id}  {t.Kw / 1000:0.0} MVA", "PV_STATIONS", rot, TextAlign.MiddleRight);   // ends just outside the box, away from the inverters
         }
     }
 
@@ -233,7 +233,7 @@ public class ScriptCanvas : ICanvas
     // TEXT reads the rest of the line as the string; height prompt exists because PV_TEXT style has height 0
     public void Text(double x, double y, double h, string text, string layer, double rotation = 0, TextAlign align = TextAlign.Left)
     {
-        string j = align switch { TextAlign.MiddleLeft => "_J _ML ", TextAlign.MiddleCenter => "_J _MC ", _ => "" };
+        string j = align switch { TextAlign.MiddleLeft => "_J _ML ", TextAlign.MiddleCenter => "_J _MC ", TextAlign.MiddleRight => "_J _MR ", _ => "" };
         L(layer).Append($"_.TEXT {j}{Pt(x, y)} {F(h)} {F(rotation)} {Ascii(text)}\n");
     }
 

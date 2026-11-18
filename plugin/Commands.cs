@@ -477,7 +477,7 @@ class AcadCanvas(Transaction tr, BlockTableRecord ms) : ICanvas
         var t = new DBText { Position = p, Height = h, TextString = text, Rotation = rotation * Math.PI / 180 };
         if (align != TextAlign.Left)
         {
-            t.HorizontalMode = align == TextAlign.MiddleCenter ? TextHorizontalMode.TextCenter : TextHorizontalMode.TextLeft;
+            t.HorizontalMode = align switch { TextAlign.MiddleCenter => TextHorizontalMode.TextCenter, TextAlign.MiddleRight => TextHorizontalMode.TextRight, _ => TextHorizontalMode.TextLeft };
             t.VerticalMode = TextVerticalMode.TextVerticalMid;
             t.AlignmentPoint = p;
         }
