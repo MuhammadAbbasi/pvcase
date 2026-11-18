@@ -2,6 +2,7 @@
 obj/
 plugin/bin/
 cli/bin/
+loader/bin/
 test/EngineCheck/bin/
 __pycache__/
 # generated outputs

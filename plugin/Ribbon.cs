@@ -54,8 +54,11 @@ public class App : IExtensionApplication
         }
     }
 
+    static bool Reloading;
+
     public void Initialize()
     {
+        try { Reloading = ComponentManager.Ribbon?.FindTab("PVLOCAL_TAB") != null; } catch (System.Exception) { }   // no ribbon in accoreconsole
         Log($"Initialize in {System.Diagnostics.Process.GetCurrentProcess().ProcessName}");
         try { RegisterMissingCommands(); } catch (System.Exception ex) { Log("commands: " + ex.Message); }
         try { UiHook(); } catch (System.Exception ex) { Log("ribbon: " + ex.Message); }   // no ribbon in accoreconsole
@@ -67,6 +70,8 @@ public class App : IExtensionApplication
     {
         foreach (var t in Tools)
         {
+            // reload (PVRELOAD): drop our previous runtime registration first; attribute-registered commands are left alone
+            try { Autodesk.AutoCAD.Internal.Utils.RemoveCommand("PVLOCAL_RT", t.Name); } catch (System.Exception) { }
             if (Autodesk.AutoCAD.Internal.Utils.IsCommandDefined(t.Name)) { Log($"{t.Name}: defined"); continue; }
             try
             {
@@ -96,7 +101,12 @@ public class App : IExtensionApplication
     static void AddTab()
     {
         var ribbon = ComponentManager.Ribbon;
-        if (ribbon == null || ribbon.FindTab("PVLOCAL_TAB") != null) return;
+        if (ribbon == null) return;
+        if (ribbon.FindTab("PVLOCAL_TAB") is { } old)
+        {
+            if (!Reloading) return;          // workspace switch with the tab still there
+            ribbon.Tabs.Remove(old);         // reload: replace with the new build's buttons
+        }
         var tab = new RibbonTab { Title = "PV Local", Id = "PVLOCAL_TAB" };
         foreach (var g in Tools.GroupBy(t => t.Panel))
         {

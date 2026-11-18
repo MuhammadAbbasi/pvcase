@@ -39,14 +39,18 @@ foreach ($p in $products) {
         "removed: $($p.Key.Name)"; continue
     }
     New-Item $dir -ItemType Directory -Force | Out-Null
-    Copy-Item (Join-Path $PSScriptRoot "bin\$($p.Build)\PVLocal.dll") $dir -Force
+    # loader (locked by the CAD, never changes) + plugin (read into memory: replaceable while the CAD runs)
+    Get-ChildItem (Join-Path $PSScriptRoot "bin\$($p.Build)") -Filter 'PVLocal*' | ForEach-Object {
+        try { Copy-Item $_.FullName $dir -Force -ErrorAction Stop }
+        catch { if ($_.Exception.Message -notmatch 'Loader') { "  skipped $($_.Exception.Message)" } }   # running CAD keeps the old loader: same code
+    }
     New-Item $key -Force | Out-Null
     Set-ItemProperty $key DESCRIPTION 'PV Local - solar plant layout'
-    Set-ItemProperty $key LOADER (Join-Path $dir 'PVLocal.dll')
+    Set-ItemProperty $key LOADER (Join-Path $dir 'PVLocal.Loader.dll')
     Set-ItemProperty $key LOADCTRLS 2 -Type DWord   # 2 = load at startup
     Set-ItemProperty $key MANAGED 1 -Type DWord
     Set-Trusted $p.Key $dir
     "installed $($p.Build): $($p.Key.Name)"
 }
 if ($Uninstall) { Remove-Item $root -Recurse -ErrorAction SilentlyContinue; return }
-'Restart AutoCAD/CADPILLAR, then type PVSETTINGS / PVLAYOUT / PVCOMPARE / PVCLEAR'
+'Done. First install: restart AutoCAD/CADPILLAR and use the PV Local ribbon tab. Updates: just rerun this script, then type PVRELOAD in the CAD (no restart).'
