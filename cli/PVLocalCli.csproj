@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- pvlocal.exe: same engine as the plugin, outputs an AutoCAD script. Needs the .NET 8 runtime (CADPILLAR installs it). -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <AssemblyName>pvlocal</AssemblyName>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <LangVersion>latest</LangVersion>
+    <InvariantGlobalization>false</InvariantGlobalization>
+  </PropertyGroup>
+  <ItemGroup>
+    <Using Remove="System.Net.Http" />
+    <Compile Include="..\plugin\Engine.cs;..\plugin\Terrain.cs;..\plugin\Yield.cs;..\plugin\Drawing.cs" />
+  </ItemGroup>
+</Project>

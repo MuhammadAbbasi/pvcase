@@ -1,0 +1,7 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- run on both runtimes: net48 = AutoCAD 2024, net8.0 = AutoCAD 2025+/CADPILLAR -->
+  <PropertyGroup><OutputType>Exe</OutputType><TargetFrameworks>net48;net8.0</TargetFrameworks><ImplicitUsings>enable</ImplicitUsings><Nullable>enable</Nullable><LangVersion>latest</LangVersion></PropertyGroup>
+  <ItemGroup><Using Remove="System.Net.Http" /></ItemGroup>
+  <!-- engine files only: Commands.cs needs AutoCAD -->
+  <ItemGroup><Compile Include="..\..\plugin\Engine.cs;..\..\plugin\Terrain.cs;..\..\plugin\Yield.cs;..\..\plugin\Polyfills.cs" /></ItemGroup>
+</Project>

@@ -1,0 +1,5 @@
+_.-LAYER _M PV_BOUNDARY 
+_.PLINE _non 0,0 _non 430,0 _non 470,200 _non 400,380 _non 0,360 _C
+_.-LAYER _M PV_EXCLUSION 
+_.PLINE _non 180,150 _non 240,140 _non 270,190 _non 230,240 _non 170,220 _C
+_.-LAYER _S 0 

@@ -1,0 +1,19 @@
+_.FILEDIA 0
+_.OSMODE 0
+_.-LAYER _M PV_BOUNDARY 
+
+_.PLINE 0,0 300,0 300,300 0,300 _C
+_.-LAYER _M PV_EXCLUSION 
+
+_.PLINE 100,100 160,100 160,160 100,160 _C
+_.NETLOAD C:\Users\user\AppData\Roaming\PVLocal\net8\PVLocal.dll
+PVLAYOUT
+
+
+PVCOMPARE
+
+_.ZOOM _E
+_.SAVEAS 2018 C:\Users\user\Desktop\pvcase_local\test\e2e_out.dwg
+_.DXFOUT C:\Users\user\Desktop\pvcase_local\test\e2e_out.dxf
+
+_.QUIT _Y

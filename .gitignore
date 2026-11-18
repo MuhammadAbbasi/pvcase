@@ -1,0 +1,13 @@
+# build intermediates (shipped binaries live in /bin)
+obj/
+plugin/bin/
+cli/bin/
+test/EngineCheck/bin/
+__pycache__/
+# generated outputs
+out/
+test/cad/
+*.log
+*_bom.csv
+*_pvlayout.scr
+pvlocal_settings.xml
