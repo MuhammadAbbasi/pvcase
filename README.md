@@ -20,8 +20,7 @@ It is an independent clean-room implementation built only from publicly describe
 |---|---|---|
 | AutoCAD 2021-2024 | Plugin, `bin\net48` | .NET Framework 4.8 |
 | AutoCAD 2025-2026 | Plugin, `bin\net8` | .NET 8 |
-| CADPILLAR 11 | Plugin, `bin
-et8` | CADPILLAR ignores `[CommandMethod]` commands, so the plugin registers them at runtime and adds a **PV Local** ribbon tab (verified in CADPILLAR 11) |
+| CADPILLAR 11 | Plugin, `bin\net8` | CADPILLAR ignores `[CommandMethod]` commands, so the plugin registers them at runtime and adds a **PV Local** ribbon tab (verified in CADPILLAR 11) |
 | Any CAD where plugins cannot load | `bin\cli\pvlocal.exe` + `SCRIPT` | Fallback: no code is loaded into the CAD; it only runs a standard command script |
 
 ### AutoCAD: plugin
