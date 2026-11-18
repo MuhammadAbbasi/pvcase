@@ -5,6 +5,7 @@
   <PropertyGroup>
     <TargetFrameworks>net48;net8.0-windows</TargetFrameworks>
     <UseWindowsForms>true</UseWindowsForms>
+    <UseWPF>true</UseWPF>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <LangVersion>latest</LangVersion>
@@ -16,6 +17,7 @@
     <Using Remove="System.Windows.Forms" />
     <Using Remove="System.Drawing" />
     <Using Remove="System.Net.Http" />
+    <Using Include="System.IO" />
   </ItemGroup>
   <!-- Autodesk's official reference packages: compile-time only, never shipped -->
   <ItemGroup Condition="'$(TargetFramework)' == 'net48'">

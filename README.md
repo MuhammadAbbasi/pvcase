@@ -20,7 +20,9 @@ It is an independent clean-room implementation built only from publicly describe
 |---|---|---|
 | AutoCAD 2021-2024 | Plugin, `bin\net48` | .NET Framework 4.8 |
 | AutoCAD 2025-2026 | Plugin, `bin\net8` | .NET 8 |
-| CADPILLAR 11 (and other OEM CADs that block plugins and LISP) | `bin\cli\pvlocal.exe` + `SCRIPT` | No code is loaded into the CAD; it only runs a standard command script |
+| CADPILLAR 11 | Plugin, `bin
+et8` | CADPILLAR ignores `[CommandMethod]` commands, so the plugin registers them at runtime and adds a **PV Local** ribbon tab (verified in CADPILLAR 11) |
+| Any CAD where plugins cannot load | `bin\cli\pvlocal.exe` + `SCRIPT` | Fallback: no code is loaded into the CAD; it only runs a standard command script |
 
 ### AutoCAD: plugin
 
@@ -31,6 +33,12 @@ powershell -ExecutionPolicy Bypass -File install.ps1 -Uninstall
 
 The installer finds every AutoCAD 2021-2026 and CADPILLAR profile for the current user. For each one it copies the matching build to `%APPDATA%\PVLocal\<net48|net8>`, registers it to load at startup, and adds that folder to the profile's `TRUSTEDPATHS`. Existing trusted paths are kept. Start AutoCAD once before installing, then restart it afterwards.
 
+A **PV Local** ribbon tab is added on startup, with two panels:
+- **Solar design:** Settings, Generate layout, Compare GCR
+- **Edit:** Clear layout
+
+The same functions are available as commands:
+
 | Command | What it does |
 |---|---|
 | `PVSETTINGS` | Settings dialog. Settings are saved inside the DWG, so each project keeps its own |
@@ -38,7 +46,7 @@ The installer finds every AutoCAD 2021-2026 and CADPILLAR profile for the curren
 | `PVCOMPARE` | Compares several GCR values: kWp, MWh/yr, kWh/kWp |
 | `PVCLEAR` | Erases everything generated; boundary and exclusions are kept |
 
-### CADPILLAR (or any AutoCAD-compatible CAD): pvlocal.exe and SCRIPT
+### Fallback for CADs that cannot load plugins: pvlocal.exe and SCRIPT
 
 1. Draw closed polylines on `PV_BOUNDARY` (site) and `PV_EXCLUSION` (no-build), then `DXFOUT` to `site.dxf`.
 2. Run `bin\cli\pvlocal.exe site.dxf`, or drag `site.dxf` onto `pvlocal.exe`. This writes:
@@ -71,6 +79,7 @@ plugin/      engine + AutoCAD plugin (C#, multi-target net48 / net8.0-windows)
   Yield.cs     sun position, tracking, shading, energy model
   Drawing.cs   what gets drawn: ICanvas -> AutoCAD database or command script
   Commands.cs  AutoCAD commands (PVLAYOUT, PVSETTINGS, PVCOMPARE, PVCLEAR)
+  Ribbon.cs    startup: PV Local ribbon tab, runtime command registration (CADPILLAR), log in %APPDATA%\PVLocal
   Polyfills.cs small .NET Framework 4.8 shims
 cli/         pvlocal.exe (DXF in -> .scr + CSV out)
 bin/         ready-to-install builds (net48, net8, cli)
@@ -108,4 +117,4 @@ The test passes on both runtimes. The CADPILLAR script route was also verified h
 - **Cable sizing:** by voltage drop only; current-carrying capacity is not checked.
 - **Yield:** a simplified model (no 3D horizon, bifacial gain or electrical shading mismatch). Use a PVGIS TMY file for P50; clear-sky results are an upper bound only. Cross-check bankable numbers in PVsyst.
 - **Not yet built:** KML/SHP/GeoJSON import and export, `.PAN`/`.OND`, PVsyst/Civil 3D export, roof mount.
-- **CADPILLAR:** the vendor has locked .NET plugins and AutoLISP, so the script route is the supported path there.
+- **CADPILLAR:** AutoLISP is disabled and `[CommandMethod]` commands are ignored; the plugin works through runtime-registered commands and its ribbon tab. Startup diagnostics are written to `%APPDATA%\PVLocal\pvlocal.log`.
