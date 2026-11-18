@@ -35,6 +35,7 @@ public partial class Settings
     [Category("3 Layout"), Description("Stop placing once this DC capacity is reached (kWp). 0 = fill the site.")] public double MaxDcKwp { get; set; } = 0;
 
     [Category("4 Piles & terrain"), Description("DEM file (ESRI ASCII grid .asc). Empty = flat ground at z=0.")] public string TerrainFile { get; set; } = "";
+    [Category("4 Piles & terrain"), Description("Grid cell (m) when building the DEM from a mesh / points in the drawing (Fetch mesh).")] public double TerrainCell { get; set; } = 2.0;
     [Category("4 Piles & terrain")] public double PileSpacing { get; set; } = 7.0;
     [Category("4 Piles & terrain"), Description("Minimum reveal: ground to torque tube / lowest beam (m).")] public double PileMinReveal { get; set; } = 1.3;
     [Category("4 Piles & terrain"), Description("Piles above this reveal are flagged (m).")] public double PileMaxReveal { get; set; } = 2.5;
@@ -52,6 +53,13 @@ public partial class Settings
     [Category("5 Electrical"), Description("Ohm*mm²/m. Cu@70°C = 0.0217, Al@70°C = 0.0356.")] public double CableResistivity { get; set; } = 0.0217;
     [Category("5 Electrical")] public double PowerFactor { get; set; } = 1.0;
     [Category("5 Electrical"), Description("Multiplier on routed length: sag, terminations, detours.")] public double CableSlack { get; set; } = 1.05;
+    [Category("5 Electrical"), Description("String inverters per MV transformer station.")] public int InvertersPerStation { get; set; } = 10;
+    [Category("5 Electrical"), Description("MV collection voltage (V).")] public double MvVoltage { get; set; } = 20000;
+    [Category("5 Electrical"), Description("Max MV voltage drop station->substation (%).")] public double MvDropMaxPct { get; set; } = 1.0;
+    [Category("5 Electrical"), Description("Ohm*mm²/m for MV cable. Al@90°C = 0.0375, Cu@90°C = 0.0225.")] public double MvCableResistivity { get; set; } = 0.0375;
+    [Category("5 Electrical"), Description("Use the picked substation point (set by MV cables / Generate all).")] public bool UseSubstationPoint { get; set; }
+    [Category("5 Electrical")] public double SubstationX { get; set; }
+    [Category("5 Electrical")] public double SubstationY { get; set; }
 
     [Category("6 Yield"), Description("Degrees, north positive.")] public double Latitude { get; set; } = 37.5;
     [Category("6 Yield"), Description("Degrees, east positive.")] public double Longitude { get; set; } = 14.0;
@@ -100,10 +108,20 @@ public class Inverter
     public double AcSection, AcDropPct;
 }
 
+public class Station
+{
+    public string Id = "";
+    public P Pos;
+    public List<Inverter> Inverters = new();
+    public List<P> MvRoute = new();
+    public double Kw, MvSection, MvDropPct;
+}
+
 public class Design
 {
     public List<Unit> Units = new();
     public List<Inverter> Inverters = new();
+    public List<Station> Stations = new();
     public P? Substation;
     public List<string> Warnings = new();
     public double TrenchLength;
@@ -113,6 +131,7 @@ public static class Engine
 {
     public static readonly double[] DcSections = [4, 6, 10, 16];
     public static readonly double[] AcSections = [16, 25, 35, 50, 70, 95, 120, 150, 185, 240, 300];
+    public static readonly double[] MvSections = [50, 70, 95, 120, 150, 185, 240, 300, 400, 500, 630];
 
     // ------------------------------------------------ geometry
     public static bool PointInPoly(double x, double y, IList<P> poly)
@@ -238,10 +257,14 @@ public static class Engine
         if (!RouteHits(alongFirst, exclusions)) return alongFirst;
         if (!RouteHits(acrossFirst, exclusions)) return acrossFirst;
         const double m = 5;
-        var xs = exclusions.SelectMany(e => new[] { e.Min(p => p.X) - m, e.Max(p => p.X) + m });
-        var ys = exclusions.SelectMany(e => new[] { e.Min(p => p.Y) - m, e.Max(p => p.Y) + m });
-        var best = xs.Select(x => new List<P> { a, (x, a.Y), (x, b.Y), b })
-            .Concat(ys.Select(y => new List<P> { a, (a.X, y), (b.X, y), b }))
+        var xs = exclusions.SelectMany(e => new[] { e.Min(p => p.X) - m, e.Max(p => p.X) + m }).Append(a.X).Append(b.X).Distinct().ToList();
+        var ys = exclusions.SelectMany(e => new[] { e.Min(p => p.Y) - m, e.Max(p => p.Y) + m }).Append(a.Y).Append(b.Y).Distinct().ToList();
+        // 3- and 4-leg Manhattan detours along exclusion bounding-box edges, both orders; shortest clear one wins
+        var best = xs.SelectMany(x => ys.SelectMany(y => new[]
+            {
+                new List<P> { a, (x, a.Y), (x, y), (b.X, y), b },
+                new List<P> { a, (a.X, y), (x, y), (x, b.Y), b },
+            }))
             .Where(r => !RouteHits(r, exclusions)).MinBy(RouteLen);
         if (best != null) return best;
         warn.Add("cable route crosses an exclusion - reroute by hand (layer PV_CABLE_*)");
@@ -402,50 +425,145 @@ public static class Engine
         u.SlopePct = Math.Abs(b) * 100;
     }
 
-    // ------------------------------------------------ run
+    // ------------------------------------------------ run: Layout (mechanical) + Wire (electrical)
     public static Design Run(List<P> boundary, List<List<P>> exclusions, Settings s, P? substation = null, Terrain? terrain = null)
     {
-        bool fixedMount = s.Mount == MountType.Fixed;
-        var b = fixedMount ? Swap(boundary) : boundary;
-        var ex = fixedMount ? exclusions.Select(e => Swap(e)).ToList() : exclusions;
-        var d = new Design();
+        var d = Layout(boundary, exclusions, s, terrain);
+        Wire(d, exclusions, s, substation);
+        return d;
+    }
+
+    /// Structures + piles only.
+    public static Design Layout(List<P> boundary, List<List<P>> exclusions, Settings s, Terrain? terrain)
+    {
+        bool fx = s.Mount == MountType.Fixed;
+        var b = fx ? Swap(boundary) : boundary;
+        var ex = fx ? exclusions.Select(e => Swap(e)).ToList() : exclusions;
         double kwpLeft = s.MaxDcKwp > 0 ? s.MaxDcKwp : double.MaxValue;
-        d.Units = Fill(b, ex, s, ref kwpLeft);
-        d.Inverters = Electrical(d.Units, ex, s, d.Warnings);
-        P? sub = substation is { } ss ? (fixedMount ? (ss.Y, ss.X) : ss)
-               : d.Inverters.Count > 0 ? (d.Inverters.Average(i => i.Pos.X), d.Inverters.Average(i => i.Pos.Y)) : null;
-        if (sub is { } su)
-            foreach (var i in d.Inverters) i.AcRoute = RouteAround(i.Pos, su, ex, d.Warnings, $"AC {i.Id}");
-        if (fixedMount)   // back to global frame
+        var d = new Design { Units = Fill(b, ex, s, ref kwpLeft) };
+        if (fx) foreach (var u in d.Units) SwapUnit(u);
+        Mechanical(d, s, terrain);
+        return d;
+    }
+
+    /// Units read back from the drawing (the user may have deleted or moved some): strings from length, rows from position.
+    public static Design FromRects(IEnumerable<(double X0, double Y0, double X1, double Y1)> rects, Settings s, Terrain? terrain)
+    {
+        bool tr = s.Mount == MountType.Tracker;
+        var opts = Enumerable.Range(1, Math.Max(1, s.StringsPerUnit)).Select(n => (N: n, Len: UnitDims(s, n).Length)).ToList();
+        var units = rects.Select(r =>
         {
-            foreach (var u in d.Units)
-            {
-                (u.X0, u.Y0, u.X1, u.Y1) = (u.Y0, u.X0, u.Y1, u.X1);
-                u.DcRoute = Swap(u.DcRoute);
-            }
+            double len = tr ? r.Y1 - r.Y0 : r.X1 - r.X0;
+            return new Unit { X0 = r.X0, Y0 = r.Y0, X1 = r.X1, Y1 = r.Y1, Strings = opts.MinBy(o => Math.Abs(o.Len - len)).N };
+        }).ToList();
+        // rows/columns: cluster on the cross-axis position (gap > 0.5 m starts a new column)
+        int col = -1; double last = double.MinValue;
+        foreach (var u in units.OrderBy(u => tr ? u.X0 : u.Y0))
+        {
+            double k = tr ? u.X0 : u.Y0;
+            if (k - last > 0.5) col++;
+            u.Col = col; last = k;
+        }
+        var d = new Design { Units = units };
+        Mechanical(d, s, terrain);
+        return d;
+    }
+
+    static void Mechanical(Design d, Settings s, Terrain? terrain)
+    {
+        foreach (var u in d.Units) SetPiles(u, s, terrain);
+        int highPiles = d.Units.Sum(u => u.Piles.Count(p => p.Reveal > s.PileMaxReveal + 1e-9));
+        if (highPiles > 0) d.Warnings.Add($"{highPiles} piles exceed max reveal {s.PileMaxReveal} m (layer PV_PILES_FLAGGED) - consider grading");
+        int steep = d.Units.Count(u => u.SlopePct > s.MaxUnitSlopePct);
+        if (steep > 0) d.Warnings.Add($"{steep} units steeper than {s.MaxUnitSlopePct}% along their axis");
+    }
+
+    static void SwapUnit(Unit u)
+    {
+        (u.X0, u.Y0, u.X1, u.Y1) = (u.Y0, u.X0, u.Y1, u.X1);
+        u.DcRoute = Swap(u.DcRoute);
+    }
+
+    /// Electrical: strings -> inverters (DC) -> transformer stations (AC) -> substation (MV); sizing; trench.
+    public static void Wire(Design d, List<List<P>> exclusions, Settings s, P? substation)
+    {
+        bool fx = s.Mount == MountType.Fixed;
+        var ex = fx ? exclusions.Select(e => Swap(e)).ToList() : exclusions;
+        if (fx) foreach (var u in d.Units) SwapUnit(u);   // local frame: unit axis = +y, corridors run along y
+        d.Inverters = Electrical(d.Units, ex, s, d.Warnings);
+        d.Stations = Stations(d.Inverters, ex, s, d.Warnings);
+        P? sub = substation is { } ss ? (fx ? (ss.Y, ss.X) : ss)
+               : d.Stations.Count > 0 ? (d.Stations.Average(t => t.Pos.X), d.Stations.Average(t => t.Pos.Y)) : null;
+        if (sub is { } su)
+            foreach (var t in d.Stations) t.MvRoute = RouteAround(t.Pos, su, ex, d.Warnings, $"MV {t.Id}");
+        if (fx)   // back to global frame
+        {
+            foreach (var u in d.Units) SwapUnit(u);
             foreach (var i in d.Inverters) { i.Pos = (i.Pos.Y, i.Pos.X); i.AcRoute = Swap(i.AcRoute); }
+            foreach (var t in d.Stations) { t.Pos = (t.Pos.Y, t.Pos.X); t.MvRoute = Swap(t.MvRoute); }
             if (sub is { } su2) sub = (su2.Y, su2.X);
         }
         d.Substation = sub;
 
         foreach (var u in d.Units)
         {
-            SetPiles(u, s, terrain);
             // each string home-runs from its own position on the unit; worst = farthest string
             double unitLen = s.Mount == MountType.Tracker ? u.Y1 - u.Y0 : u.X1 - u.X0;
             double worst = (RouteLen(u.DcRoute) + unitLen * (u.Strings - 0.5) / u.Strings) * s.CableSlack;
             (u.DcSection, u.DcDropPct) = SizeDc(worst, s);
         }
         foreach (var i in d.Inverters) (i.AcSection, i.AcDropPct) = SizeAc(RouteLen(i.AcRoute) * s.CableSlack, s);
-        d.TrenchLength = TrenchLength(d.Units.Select(u => u.DcRoute).Concat(d.Inverters.Select(i => i.AcRoute)));
+        foreach (var t in d.Stations) (t.MvSection, t.MvDropPct) = SizeMv(RouteLen(t.MvRoute) * s.CableSlack, t.Kw, s);
+        d.TrenchLength = TrenchLength(d.Units.Select(u => u.DcRoute).Concat(d.Inverters.Select(i => i.AcRoute)).Concat(d.Stations.Select(t => t.MvRoute)));
 
         if (StringVocCold(s) > s.MaxSystemVoltage)
             d.Warnings.Add($"String Voc at {s.SiteMinTempC}°C = {StringVocCold(s):0} V > {s.MaxSystemVoltage} V: use <= {MaxModulesPerString(s)} modules/string");
-        int highPiles = d.Units.Sum(u => u.Piles.Count(p => p.Reveal > s.PileMaxReveal + 1e-9));
-        if (highPiles > 0) d.Warnings.Add($"{highPiles} piles exceed max reveal {s.PileMaxReveal} m (layer PV_PILES_FLAGGED) - consider grading");
-        int steep = d.Units.Count(u => u.SlopePct > s.MaxUnitSlopePct);
-        if (steep > 0) d.Warnings.Add($"{steep} units steeper than {s.MaxUnitSlopePct}% along their axis");
-        return d;
+        if (d.Stations.Any(t => t.MvDropPct > s.MvDropMaxPct + 1e-9))
+            d.Warnings.Add($"MV voltage drop above {s.MvDropMaxPct}% even at {MvSections[MvSections.Length - 1]} mm² - move the substation or add feeders");
+    }
+
+    /// Inverters (already in snake order) grouped into transformer stations; AC from each inverter to its station.
+    static List<Station> Stations(List<Inverter> invs, List<List<P>> exclusions, Settings s, List<string> warn)
+    {
+        var res = new List<Station>();
+        int per = Math.Max(1, s.InvertersPerStation);
+        for (int k = 0; k * per < invs.Count; k++)
+        {
+            var g = invs.Skip(k * per).Take(per).ToList();
+            // ponytail: station at the group centroid, on the nearest inverter's corridor; no road/access model
+            double cx = g.Average(i => i.Pos.X), cy = g.Average(i => i.Pos.Y);
+            double x = g.MinBy(i => Math.Abs(i.Pos.X - cx))!.Pos.X;
+            var t = new Station { Id = $"TS-{k + 1:00}", Pos = (x, ClearSpot(x, cy, exclusions)), Inverters = g, Kw = g.Count * s.InverterKw };
+            foreach (var i in g) i.AcRoute = RouteAround(i.Pos, t.Pos, exclusions, warn, $"AC {i.Id}");
+            res.Add(t);
+        }
+        return res;
+    }
+
+    public static (double Section, double DropPct) SizeMv(double lengthM, double kw, Settings s)
+    {
+        double i = kw * 1000 / (Math.Sqrt(3) * s.MvVoltage * s.PowerFactor);
+        double Drop(double a) => Math.Sqrt(3) * lengthM * i * s.MvCableResistivity / a * s.PowerFactor / s.MvVoltage * 100;
+        foreach (var a in MvSections) if (Drop(a) <= s.MvDropMaxPct) return (a, Drop(a));
+        double big = MvSections[MvSections.Length - 1];
+        return (big, Drop(big));
+    }
+
+    /// Terrain check: slope along the unit axis (N-S for trackers, E-W for fixed tables) on a grid inside the boundary.
+    public static List<(double X0, double Y0, double X1, double Y1, double SlopePct)> TerrainCheck(Terrain t, List<P> boundary, double cell, Settings s)
+    {
+        var res = new List<(double, double, double, double, double)>();
+        double minX = boundary.Min(p => p.X), maxX = boundary.Max(p => p.X), minY = boundary.Min(p => p.Y), maxY = boundary.Max(p => p.Y);
+        bool tr = s.Mount == MountType.Tracker;
+        for (double x = minX; x < maxX; x += cell)
+            for (double y = minY; y < maxY; y += cell)
+            {
+                double cx = x + cell / 2, cy = y + cell / 2, h = cell / 2;
+                if (!PointInPoly(cx, cy, boundary)) continue;
+                double slope = tr ? (t.At(cx, cy + h) - t.At(cx, cy - h)) / (2 * h) : (t.At(cx + h, cy) - t.At(cx - h, cy)) / (2 * h);
+                res.Add((x, y, x + cell, y + cell, Math.Abs(slope) * 100));
+            }
+        return res;
     }
 
     /// Pile schedule: length bins (reveal) -> count. Embedment depth is a geotech input, not modelled.
@@ -482,11 +600,16 @@ public static class Engine
             rows.Add(($"DC string cable {g.Key} mm² (+/-)", Math.Round(g.Sum(u => DcCableLen(u, s))), "m"));
         foreach (var g in d.Inverters.GroupBy(i => i.AcSection).OrderBy(g => g.Key))
             rows.Add(($"AC cable 3x{g.Key} mm²", Math.Round(g.Sum(i => RouteLen(i.AcRoute)) * s.CableSlack), "m"));
+        if (d.Stations.Count > 0)
+            rows.Add(($"transformer stations (<= {s.InvertersPerStation} inverters, {s.MvVoltage / 1000:0.#} kV)", d.Stations.Count, "pcs"));
+        foreach (var g in d.Stations.GroupBy(t => t.MvSection).OrderBy(g => g.Key))
+            rows.Add(($"MV cable 3x{g.Key} mm²", Math.Round(g.Sum(t => RouteLen(t.MvRoute)) * s.CableSlack), "m"));
         rows.Add(("trench (shared runs merged)", Math.Round(d.TrenchLength), "m"));
         rows.Add(("string Voc at min temp", Math.Round(StringVocCold(s)), "V"));
         rows.Add(("max DC voltage drop", Math.Round(d.Units.Select(u => u.DcDropPct).DefaultIfEmpty().Max(), 2), "%"));
         rows.Add(("max AC voltage drop", Math.Round(d.Inverters.Select(i => i.AcDropPct).DefaultIfEmpty().Max(), 2), "%"));
         rows.Add(("max DC+AC voltage drop", Math.Round(MaxTotalDrop(d), 2), "%"));
+        if (d.Stations.Count > 0) rows.Add(("max MV voltage drop", Math.Round(d.Stations.Max(t => t.MvDropPct), 2), "%"));
         rows.Add(("DC capacity", Math.Round(dcKwp, 1), "kWp"));
         rows.Add(("AC capacity", acKw, "kW"));
         rows.Add(("DC/AC ratio", acKw > 0 ? Math.Round(dcKwp / acKw, 3) : 0, ""));

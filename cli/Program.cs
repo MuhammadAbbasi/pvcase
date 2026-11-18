@@ -49,16 +49,17 @@ static int Run(string[] args)
     var designs = boundaries.Select(b => Engine.Run(b, exclusions, s, null, terrain)).ToList();
     foreach (var d in designs)
     {
-        all.Units.AddRange(d.Units); all.Inverters.AddRange(d.Inverters);
+        all.Units.AddRange(d.Units); all.Inverters.AddRange(d.Inverters); all.Stations.AddRange(d.Stations);
         all.Warnings.AddRange(d.Warnings); all.TrenchLength += d.TrenchLength;
     }
     for (int i = 0; i < all.Inverters.Count; i++) { all.Inverters[i].Id = $"INV-{i + 1:00}"; foreach (var u in all.Inverters[i].Units) u.Inverter = all.Inverters[i].Id; }
+    for (int i = 0; i < all.Stations.Count; i++) all.Stations[i].Id = $"TS-{i + 1:00}";
 
     var y = Yield.Run(all, s, weather);
     var bom = Engine.Bom(all, s, y);
 
     var canvas = new ScriptCanvas();
-    foreach (var d in designs) Drawing.Layout(canvas, d, s);
+    foreach (var d in designs) Drawing.All(canvas, d, s);
     double right = boundaries.SelectMany(p => p).Max(p => p.X), top = boundaries.SelectMany(p => p).Max(p => p.Y);
     Drawing.BomText(canvas, bom, right + 30, top);
     Drawing.Sld(canvas, all, s, right + 160, top);

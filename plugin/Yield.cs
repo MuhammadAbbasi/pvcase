@@ -104,7 +104,8 @@ public static class Yield
         double dcKwp = d.Units.Sum(u => u.Strings) * s.ModulesPerString * s.ModulePowerW / 1000;
         double acKw = d.Inverters.Count * s.InverterKw;
         double dcWire = d.Units.Count == 0 ? 0 : d.Units.Average(u => u.DcDropPct) * 0.6;   // avg drop at Imp; ~0.6 energy-weighted
-        double acWire = d.Inverters.Count == 0 ? 0 : d.Inverters.Average(i => i.AcDropPct) * 0.6;
+        double acWire = (d.Inverters.Count == 0 ? 0 : d.Inverters.Average(i => i.AcDropPct) * 0.6)
+                      + (d.Stations.Count == 0 ? 0 : d.Stations.Average(t => t.MvDropPct) * 0.6);   // LV AC + MV
         bool tracker = s.Mount == MountType.Tracker;
         double tilt = s.TiltDeg * Math.PI / 180;
 

@@ -9,8 +9,8 @@ It is an independent clean-room implementation built only from publicly describe
 | Area | Features |
 |---|---|
 | Layout | Single-axis trackers (N-S axis, backtracking) or fixed-tilt tables (1P/2P); GCR-driven pitch; setbacks from boundary and exclusions; partial trackers to fill edges; DC capacity cap (`MaxDcKwp`); multiple boundaries |
-| Terrain and piles | DEM import (ESRI ASCII grid `.asc`); best-fit straight structure per unit; pile reveal per pile; piles over the max reveal flagged (red layer `PV_PILES_FLAGGED`); pile-length schedule in bins; slope warning per unit; 3D posts and torque tubes |
-| Electrical | Auto string length from cold Voc against 1000/1500 V; string-inverter grouping (snake order); DC/AC Manhattan routing that detours around exclusions; inverters kept out of exclusions; DC and AC cable sizing by voltage drop (IEC-style resistive); trench length with shared runs merged; single-line diagram |
+| Terrain and piles | DEM import (ESRI ASCII grid `.asc`) or built from the drawing's 3D faces, meshes, points or contours; slope check map; best-fit straight structure per unit; pile reveal per pile; piles over the max reveal flagged (red layer `PV_PILES_FLAGGED`); pile-length schedule in bins; slope warning per unit; 3D posts and torque tubes |
+| Electrical | Auto string length from cold Voc against 1000/1500 V; string-inverter grouping (snake order); transformer stations and MV feeders to the substation; DC/AC/MV Manhattan routing that detours around exclusions; inverters and stations kept out of exclusions; DC, AC and MV cable sizing by voltage drop (IEC-style resistive); trench length with shared runs merged; single-line diagram |
 | Yield | Hourly model: NOAA sun position, tracker backtracking, row-to-row shading, isotropic sky, IAM, NOCT temperature, soiling, mismatch, wiring, inverter efficiency and clipping; P50/P90, specific yield, PR, loss breakdown; GCR scenario comparison. Weather: PVGIS TMY CSV (download once) or a clear-sky estimate |
 | Output | Drawing on `PV_*` layers, BOM table plus CSV (Excel-ready, uses the local list separator), SLD |
 
@@ -32,18 +32,27 @@ powershell -ExecutionPolicy Bypass -File install.ps1 -Uninstall
 
 The installer finds every AutoCAD 2021-2026 and CADPILLAR profile for the current user. For each one it copies the matching build to `%APPDATA%\PVLocal\<net48|net8>`, registers it to load at startup, and adds that folder to the profile's `TRUSTEDPATHS`. Existing trusted paths are kept. Start AutoCAD once before installing, then restart it afterwards.
 
-A **PV Local** ribbon tab is added on startup, with two panels:
-- **Solar design:** Settings, Generate layout, Compare GCR
-- **Edit:** Clear layout
+A **PV Local** ribbon tab is added on startup. Its panels follow the design workflow:
 
-The same functions are available as commands:
+| Panel | Button | Command | What it does |
+|---|---|---|---|
+| Site | Site area | `PVAREA` | Select the closed polylines that bound the plant; they move to layer `PV_BOUNDARY` |
+| Site | Exclusion zones | `PVEXCLUDE` | Select roads, wetlands, buildings and buffers; they move to layer `PV_EXCLUSION` |
+| Site | Fetch mesh | `PVMESH` | Builds the terrain from the drawing: 3D faces, polyface and sub-D meshes, points, survey blocks with Z, 3D polylines, contours with elevation. Saved as `<dwg>_terrain.asc` and set as `TerrainFile` |
+| Site | Terrain check | `PVTERRAIN` | Slope map along the tracker or table axis, in 5 m cells: green up to half the limit, yellow up to `MaxUnitSlopePct`, red above. Shows the share of the area in each class |
+| Design | Settings | `PVSETTINGS` | Settings dialog. Settings are saved inside the DWG, so each project keeps its own |
+| Design | Generate layout | `PVLAYOUT` | Trackers or tables and piles inside the site area, on the terrain if one is loaded. Piles above the max reveal go on `PV_PILES_FLAGGED` |
+| Design | Compare GCR | `PVCOMPARE` | Compares several GCR values: kWp, MWh/yr, kWh/kWp |
+| Electrical | DC cables | `PVDC` | String inverters and DC string cables, sized for voltage drop |
+| Electrical | AC cables | `PVAC` | Transformer stations (`InvertersPerStation`) and LV AC cables from inverter to station |
+| Electrical | MV cables | `PVMV` | Pick the substation (Enter keeps the current one, or chooses automatically); MV feeders from station to substation; trench |
+| Electrical | BOM + SLD | `PVBOM` | BOM table plus `<dwg>_bom.csv`, single-line diagram (substation, MV bus, stations, inverters, strings), energy yield |
+| Plant | Generate all | `PVPLANT` | Layout, DC, AC, MV and BOM/SLD in one go |
+| Plant | Clear | `PVCLEAR` | Erases everything generated; the site area and exclusions are kept |
 
-| Command | What it does |
-|---|---|
-| `PVSETTINGS` | Settings dialog. Settings are saved inside the DWG, so each project keeps its own |
-| `PVLAYOUT` | Pick boundary polylines, or press Enter to use all closed polylines on layer `PV_BOUNDARY`. Exclusions come from layer `PV_EXCLUSION`. Pick a substation point or press Enter for auto. Draws the layout, BOM table and SLD, and writes `<dwg>_bom.csv` |
-| `PVCOMPARE` | Compares several GCR values: kWp, MWh/yr, kWh/kWp |
-| `PVCLEAR` | Erases everything generated; boundary and exclusions are kept |
+The electrical steps read the trackers that are already in the drawing. If you delete or move trackers by hand, the cabling follows your edits.
+
+A step that is re-run replaces its own output and everything after it. A missing earlier step is drawn automatically: for example, `PVMV` with no DC cables drawn yet will draw DC and AC as well.
 
 ### Fallback for CADs that cannot load plugins: pvlocal.exe and SCRIPT
 

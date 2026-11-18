@@ -61,13 +61,41 @@ Check(bins.Values.Sum() == piles.Count, "pile distribution sums to pile count");
 Console.WriteLine("(4) stringing, DC/AC routing to central transformer, voltage drop, SLD");
 Check(d.Units.All(u => u.Inverter != "") && d.Inverters.Sum(i => i.Strings) == d.Units.Sum(u => u.Strings), "every string assigned to exactly one inverter");
 Check(d.Inverters.All(i => i.Strings <= s.StringsPerInverter), $"no inverter above {s.StringsPerInverter} strings");
-bool routesClear = d.Units.All(u => !Engine.RouteHits(u.DcRoute, [wetland])) && d.Inverters.All(i => !Engine.RouteHits(i.AcRoute, [wetland]));
-Check(routesClear, "no DC/AC route crosses the wetland");
+bool routesClear = d.Units.All(u => !Engine.RouteHits(u.DcRoute, [wetland])) && d.Inverters.All(i => !Engine.RouteHits(i.AcRoute, [wetland]))
+    && d.Stations.All(t => !Engine.RouteHits(t.MvRoute, [wetland]));
+Check(routesClear, "no DC/AC/MV route crosses the wetland");
+Check(d.Stations.Count == (d.Inverters.Count + s.InvertersPerStation - 1) / s.InvertersPerStation
+    && d.Stations.SelectMany(t => t.Inverters).Distinct().Count() == d.Inverters.Count, $"{d.Stations.Count} transformer stations, every inverter on exactly one");
+Check(d.Stations.All(t => t.MvDropPct <= s.MvDropMaxPct && t.MvRoute.Count >= 2), $"MV feeders to substation, max drop {d.Stations.Max(t => t.MvDropPct):0.00}% <= {s.MvDropMaxPct}%");
+// electrical steps read trackers back from the drawing: same rectangles -> same strings and same wiring
+var back2 = Engine.FromRects(d.Units.Select(u => (u.X0, u.Y0, u.X1, u.Y1)), s, dem);
+Engine.Wire(back2, [wetland], s, null);
+Check(back2.Units.Sum(u => u.Strings) == d.Units.Sum(u => u.Strings) && back2.Inverters.Count == d.Inverters.Count && back2.Stations.Count == d.Stations.Count,
+    "trackers read back from drawing -> same strings, inverters, stations");
 Check(Engine.MaxTotalDrop(d) < 2.0, $"worst DC+AC voltage drop {Engine.MaxTotalDrop(d):0.00}% < 2%");
 Check(d.TrenchLength > 0 && d.TrenchLength < d.Units.Sum(u => Engine.RouteLen(u.DcRoute)) + d.Inverters.Sum(i => Engine.RouteLen(i.AcRoute)),
     $"trench {d.TrenchLength:0} m (shared runs merged)");
 Console.WriteLine($"         SLD: TRANSFORMER <- {d.Inverters.Count} x INV {s.InverterKw} kW <- {d.Units.Sum(u => u.Strings)} strings x {s.ModulesPerString} mod");
 Console.WriteLine("         (SLD drawing itself is drawn by PVLAYOUT in CAD; topology verified above)");
+
+Console.WriteLine("    terrain from a CAD mesh (Fetch mesh)");
+{
+    // triangulate the analytic surface at 10 m, rebuild a 2 m DEM from the triangles, compare with the surface
+    Func<double, double, double> surf = (px, py) => 100 + 0.06 * py + 0.03 * px;
+    var tris = new List<(double X, double Y, double Z)[]>();
+    for (double gx = 0; gx < 300; gx += 10) for (double gy = 0; gy < 300; gy += 10)
+    {
+        (double, double, double) V(double a, double b) => (a, b, surf(a, b));
+        tris.Add([V(gx, gy), V(gx + 10, gy), V(gx + 10, gy + 10)]); tris.Add([V(gx, gy), V(gx + 10, gy + 10), V(gx, gy + 10)]);
+    }
+    var mesh = Terrain.FromSamples(tris, [], 0, 0, 300, 300, 2);
+    double err = Enumerable.Range(0, 50).Max(k => Math.Abs(mesh.At(7 + k * 5.3, 11 + k * 5.1) - surf(7 + k * 5.3, 11 + k * 5.1)));
+    Check(err < 0.01, $"DEM from {tris.Count} mesh triangles matches the surface (max error {err * 100:0.0} cm)");
+    var gap = Terrain.FromSamples([], [(0, 0, 10), (300, 300, 40)], 0, 0, 300, 300, 5);
+    Check(gap.At(10, 10) == 10 && gap.At(290, 290) == 40, "gaps filled from nearest survey point");
+    var slope = Engine.TerrainCheck(mesh, [(0, 0), (300, 0), (300, 300), (0, 300)], 10, s);
+    Check(slope.All(c => Math.Abs(c.SlopePct - 6) < 0.1), $"terrain check: N-S slope {slope[0].SlopePct:0.0}% (surface 6%) on {slope.Count} cells");
+}
 
 Console.WriteLine("(5) shading + annual yield (clear-sky year: no TMY file in test)");
 var w = Weather.ClearSkyYear(s.Latitude, s.Longitude);
